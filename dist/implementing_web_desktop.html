@@ -34,15 +34,66 @@
                                   <aside>
                       <h3> TABLE OF CONTENTS </h3>
                       <ul>
-                      <li><a href="#implementing-web-desktop">Implementing Web Desktop</a><ul>
-                      <li><a href="#overview">Overview</a></li>
+                      <li><a href="#implementing-web-desktop-novnc-proxy">Implementing Web Desktop (NoVNC Proxy)</a><ul>
+                      <li><a href="#overview-how-it-works">Overview / How It Works</a><ul>
+                      <li><a href="#server-components">Server Components</a><ul>
+                      <li><a href="#nginx-novnc-authenticationproxy"><a href="https://github.com/cyverse/nginx_novnc_auth">Nginx NoVNC authentication/proxy</a></a></li>
+                      <li><a href="#vnc-server-and-novnc-server-on-instance">VNC Server and NoVNC Server on instance</a></li>
+                      <li><a href="#atmosphere-ansible">atmosphere-ansible</a></li>
+                      </ul></li>
+                      <li><a href="#workflows">Workflows</a><ul>
+                      <li><a href="#at-instance-deploy-time">At Instance Deploy Time</a></li>
+                      <li><a href="#at-connection-time">At Connection Time</a></li>
+                      </ul></li>
+                      </ul></li>
+                      <li><a href="#implementation-guide">Implementation Guide</a></li>
+                      <li><a href="#questions">Questions</a></li>
                       </ul></li>
                       </ul>
                   </aside>
                               <!-- MAIN CONTENT -->
               <article>
-              <h1 id="implementing-web-desktop">Implementing Web Desktop</h1>
-              <h2 id="overview">Overview</h2>
+              <h1 id="implementing-web-desktop-novnc-proxy">Implementing Web Desktop (NoVNC Proxy)</h1>
+              <h2 id="overview-how-it-works">Overview / How It Works</h2>
+              <p><a href="https://kanaka.github.io/noVNC/">NoVNC</a> (<a href="https://github.com/novnc/noVNC/blob/master/README.md">readme</a>) is an HTML5 VNC client. It is used with Atmosphere to provide a seamless experience for users who wish to interact with their instance with a GUI rather than a shell.</p>
+              <h3 id="server-components">Server Components</h3>
+              <h4 id="nginx-novnc-authenticationproxy"><a href="https://github.com/cyverse/nginx_novnc_auth">Nginx NoVNC authentication/proxy</a></h4>
+              <p>This code contains a Flask application that authenticates users, and an Nginx configuration to proxy websockets.</p>
+              <p>It can be installed on the same server that runs GateOne.</p>
+              <h4 id="vnc-server-and-novnc-server-on-instance">VNC Server and NoVNC Server on instance</h4>
+              <p>The instance runs the commercial VNC Server (which must be licensed).</p>
+              <h4 id="atmosphere-ansible">atmosphere-ansible</h4>
+              <p>atmosphere-ansible configures VNC Server and NoVNC websocket server on new instances via <a href="https://github.com/cyverse/atmosphere-ansible/blob/master/ansible/playbooks/instance_deploy/40_novnc_install.yml">40_novnc_install.yml</a> and the <a href="https://github.com/cyverse/atmosphere-ansible/tree/master/ansible/roles/atmo-novnc">atmo-novnc</a> role.</p>
+              <h3 id="workflows">Workflows</h3>
+              <h4 id="at-instance-deploy-time">At Instance Deploy Time</h4>
+              <p>atmosphere-ansible roughly does this:</p>
+              <ul>
+              <li>Checks for existence of an X window server on the instance</li>
+              <li>Installs NoVNC websocket server bits (Julian, can you clarify?)</li>
+              <li>Is a VNC server installed by atmosphere-ansible or is it expected to already be available on the instances?</li>
+              <li>Starts and configures VNC Server, sets license</li>
+              <li>Sets the “Web desktop” value in Atmosphere database (how?)</li>
+              </ul>
+              <p>Then, the Web Desktop button will appear when the instance page is loaded.</p>
+              <h4 id="at-connection-time">At Connection Time</h4>
+              <ul>
+              <li>User browses to page for an active instance, clicks “Web Desktop” button</li>
+              <li>NoVNC client code loads in browser, client establishes a web socket to the instance via NoVNC proxy</li>
+              <li>How does auth work?</li>
+              <li>What else?</li>
+              <li>VNC session launches</li>
+              </ul>
+              <h2 id="implementation-guide">Implementation Guide</h2>
+              <p>Choose a server to run the Nginx NoVNC Auth services</p>
+              <p>…</p>
+              <h2 id="questions">Questions</h2>
+              <ul>
+              <li>What exactly does the NoVNC server component on instances do?</li>
+              <li>Regarding terminology, does the “NoVNC Proxy” run on the Atmosphere instance or on the Nginx server?</li>
+              <li>How does Atmosphere come to know that an instance has web desktop enabled?</li>
+              <li>Why do we have a NoVNC proxy? For auth?</li>
+              <li>How is auth handled for the websocket, i.e. how does the instance authenticate users? Shared secret between instance and NoVNC proxy, and NoVNC proxy somehow confirms that requests came from Atmosphere?</li>
+              </ul>
               </article>
             </div> <!-- #main -->
         </div> <!-- #main-container -->
