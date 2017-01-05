@@ -36,18 +36,20 @@
                       <ul>
                       <li><a href="#implementing-web-desktop-novnc-proxy">Implementing Web Desktop (NoVNC Proxy)</a><ul>
                       <li><a href="#overview-how-it-works">Overview / How It Works</a><ul>
-                      <li><a href="#server-components">Server Components</a><ul>
-                      <li><a href="#nginx-novnc-authenticationproxy"><a href="https://github.com/cyverse/nginx_novnc_auth">Nginx NoVNC authentication/proxy</a></a></li>
-                      <li><a href="#vnc-server-and-novnc-server-on-instance">VNC Server and NoVNC Server on instance</a></li>
-                      <li><a href="#atmosphere-ansible">atmosphere-ansible</a></li>
-                      </ul></li>
-                      <li><a href="#workflows">Workflows</a><ul>
-                      <li><a href="#at-instance-deploy-time">At Instance Deploy Time</a></li>
-                      <li><a href="#at-connection-time">At Connection Time</a></li>
+                      <li><a href="#summary-of-connection-workflow">Summary of Connection Workflow</a></li>
+                      <li><a href="#novnc-connection-ascii-diagram">NoVNC Connection ASCII Diagram</a></li>
+                      <li><a href="#how-authentication-works">How Authentication Works</a></li>
+                      <li><a href="#components-deep-dive">Components Deep Dive</a><ul>
+                      <li><a href="#on-atmosphere-server-troposphere">On Atmosphere server: Troposphere</a></li>
+                      <li><a href="#on-gateway-server-novnc-authentication-proxy">On Gateway server: <a href="https://github.com/cyverse/nginx_novnc_auth">NoVNC Authentication + Proxy</a></a></li>
+                      <li><a href="#on-instance-websockify">On instance: websockify</a></li>
+                      <li><a href="#on-instance-realvnc-server">On instance: RealVNC Server?</a></li>
+                      <li><a href="#on-atmosphere-server-atmosphere-ansible">On Atmosphere server: atmosphere-ansible</a></li>
                       </ul></li>
                       </ul></li>
                       <li><a href="#implementation-guide">Implementation Guide</a></li>
                       <li><a href="#questions">Questions</a></li>
+                      <li><a href="#todo">TODO</a></li>
                       </ul></li>
                       </ul>
                   </aside>
@@ -55,44 +57,95 @@
               <article>
               <h1 id="implementing-web-desktop-novnc-proxy">Implementing Web Desktop (NoVNC Proxy)</h1>
               <h2 id="overview-how-it-works">Overview / How It Works</h2>
-              <p><a href="https://kanaka.github.io/noVNC/">NoVNC</a> (<a href="https://github.com/novnc/noVNC/blob/master/README.md">readme</a>) is an HTML5 VNC client. It is used with Atmosphere to provide a seamless experience for users who wish to interact with their instance with a GUI rather than a shell.</p>
-              <h3 id="server-components">Server Components</h3>
-              <h4 id="nginx-novnc-authenticationproxy"><a href="https://github.com/cyverse/nginx_novnc_auth">Nginx NoVNC authentication/proxy</a></h4>
-              <p>This code contains a Flask application that authenticates users, and an Nginx configuration to proxy websockets.</p>
-              <p>It can be installed on the same server that runs GateOne.</p>
-              <h4 id="vnc-server-and-novnc-server-on-instance">VNC Server and NoVNC Server on instance</h4>
-              <p>The instance runs the commercial VNC Server (which must be licensed).</p>
-              <h4 id="atmosphere-ansible">atmosphere-ansible</h4>
-              <p>atmosphere-ansible configures VNC Server and NoVNC websocket server on new instances via <a href="https://github.com/cyverse/atmosphere-ansible/blob/master/ansible/playbooks/instance_deploy/40_novnc_install.yml">40_novnc_install.yml</a> and the <a href="https://github.com/cyverse/atmosphere-ansible/tree/master/ansible/roles/atmo-novnc">atmo-novnc</a> role.</p>
-              <h3 id="workflows">Workflows</h3>
-              <h4 id="at-instance-deploy-time">At Instance Deploy Time</h4>
-              <p>atmosphere-ansible roughly does this:</p>
-              <ul>
-              <li>Checks for existence of an X window server on the instance</li>
-              <li>Installs NoVNC websocket server bits (Julian, can you clarify?)</li>
-              <li>Is a VNC server installed by atmosphere-ansible or is it expected to already be available on the instances?</li>
-              <li>Starts and configures VNC Server, sets license</li>
-              <li>Sets the “Web desktop” value in Atmosphere database (how?)</li>
-              </ul>
-              <p>Then, the Web Desktop button will appear when the instance page is loaded.</p>
-              <h4 id="at-connection-time">At Connection Time</h4>
+              <p><a href="https://kanaka.github.io/noVNC/">NoVNC</a> (<a href="https://github.com/novnc/noVNC/blob/master/README.md">readme</a>) is an HTML5 VNC client. It is used with Atmosphere to provide a seamless browser-based experience for users who wish to interact with their instance with a GUI, rather than a shell.</p>
+              <p>NoVNC has no built-in means of authentication, and the (open source) VNC protocol has no encryption, so the instance’s VNC server is behind a gateway server, which authenticates connection requests from users and proxies a secure WebSocket which contains VNC traffic.</p>
+              <h3 id="summary-of-connection-workflow">Summary of Connection Workflow</h3>
               <ul>
               <li>User browses to page for an active instance, clicks “Web Desktop” button</li>
-              <li>NoVNC client code loads in browser, client establishes a web socket to the instance via NoVNC proxy</li>
-              <li>How does auth work?</li>
-              <li>What else?</li>
+              <li>Web browser sends POST request to Troposphere at <code>/web_desktop</code></li>
+              <li>Troposphere returns an HTTP redirect containing a signed token, e.g. <code>https://webaccess.cyverse.org/vncws/?token=mysupersecrettoken&amp;password=display</code></li>
+              <li>User’s browser connects to NoVNC gateway server</li>
+              <li>Nginx on the gateway server makes subrequest to auth_server Flask application</li>
+              <li>auth_server decodes and attempts to verify token, returns HTTP code 200 (OK) or 401 (unauthorized), also returns the target IP of the instance</li>
+              <li>If auth succeeds, Nginx serves static NoVNC client content, and proxies request for <code>/websockify</code> to the destination instance, port 4200</li>
+              <li>Client establishes WebSocket connection to websockify on the instance</li>
+              <li>On the instance, websockify un-wraps the session(?), forwards VNC connection to RealVNC Server</li>
               <li>VNC session launches</li>
               </ul>
+              <h3 id="novnc-connection-ascii-diagram">NoVNC Connection ASCII Diagram</h3>
+              <p>Once the initial token generation, authentication, proxying, etc. is complete, the network connections look like this:</p>
+              <pre><code>(&quot;WS&quot; = WebSocket)
+              
+              [User&#39;s browser] &lt;-- encrypted WS --&gt; [Nginx on gateway server] &lt;-- unencrypted WS --&gt; [Websockify on instance] &lt;-- VNC --&gt; [RealVNC server on instance]</code></pre>
+              <h3 id="how-authentication-works">How Authentication Works</h3>
+              <p>Troposphere encrypts and signs a token that is embedded in a HTTP redirect that is served to the user. The gateway server decrypts the token and verifies that it was signed by Troposphere, before proxying the websocket connection to the instance. <a href="https://www.palletsprojects.com/p/itsdangerous/">itsdangerous</a> is used for the token signing/verification functions. To accomplish this, both Troposphere and the gateway server know some secrets, a signing secret and a fingerprint secret (and a salt for each). Collectively, we’ll call these the <em>shared secrets</em>.</p>
+              <h3 id="components-deep-dive">Components Deep Dive</h3>
+              <h4 id="on-atmosphere-server-troposphere">On Atmosphere server: Troposphere</h4>
+              <p>Troposphere presents user with a “Web Desktop” button. When the user clicks the button, a JavaScript handler submits an HTML form (POST request) to <code>/web_desktop</code>, containing an IP address of the instance. Upon receiving this request, Troposphere performs minimal checking to confirm that the user is an authenticated Atmosphere user, then <a href="https://github.com/cyverse/troposphere/blob/4db0a2ba6547437a5d5840679ff5cc4011bd87a4/troposphere/views/web_desktop.py">generates a redirect containing a token</a>, and serves it to the browser. The token authorizes its bearer (with a given browser fingerprint) to start a VNC session to a given IP address.</p>
+              <p>Token contains:</p>
+              <ul>
+              <li>Signature of client IP address</li>
+              <li>Signture of browser fingerprint</li>
+              </ul>
+              <h4 id="on-gateway-server-novnc-authentication-proxy">On Gateway server: <a href="https://github.com/cyverse/nginx_novnc_auth">NoVNC Authentication + Proxy</a></h4>
+              <p>Functionally does these things:</p>
+              <ol style="list-style-type: decimal">
+              <li>Authenticates NoVNC connection requests from users (as described above)</li>
+              <li>Proxies the WebSocket connection (carrying VNC traffic) to the instance</li>
+              <li>Provides TLS for the WebSocket connection between the user’s browser and the gateway server</li>
+              </ol>
+              <p>This is implemented as a simple <a href="http://flask.pocoo.org/">Flask</a> application and some Nginx configuration.</p>
+              <p>The token is passed to gateway server via URL query string. Doesn’t look for a cookie or anything, everything needed to connect is passed in the token.</p>
+              <pre><code>https://webaccess.cyverse.org/vncws/?token=WyIxMjguMTk2LjY0LjE0MSIsImp0VDU2bldlV3VNQ2hyakdNdDRweWw2cHIyRBIsIjJmcUhFdnY4ZEFFFkNOLVhYUndpX05QaEY4NCJd.C08S7w.ajxE6VbmY7EVy4EW5o9tX96h-2w&amp;password=display</code></pre>
+              <p>Nginx is configured to use <a href="http://nginx.org/en/docs/http/ngx_http_auth_request_module.html">ngx_http_auth_request_module?</a>. A subrequest containing the token is made to the Flask application (at <code>/auth</code>), and access is either granted or denied based on the response code.</p>
+              <p>The Flask application attempts to decode the token and validate the signature, using the shared secrets that are also known to Troposphere. It returns the HTTP status code (200 for valid or 401 for invalid fingerprint), and the instance IP address, to Nginx.</p>
+              <p>If the subrequest returns 200, then Nginx proxies the WebSocket connection to the websockify server on the instance.</p>
+              <h4 id="on-instance-websockify">On instance: websockify</h4>
+              <p><a href="https://github.com/novnc/websockify">websockify</a> wraps a TCP connection in a WebSocket. This allows the VNC session to be carried from the user’s browser, through the gateway server, to the VNC Server on the instance, and back.</p>
+              <p>Websockify is only configured to support a not encrypted(?) WebSocket, so a gateway server is required to wrap TLS around the WebSocket before serving it to the user.</p>
+              <h4 id="on-instance-realvnc-server">On instance: RealVNC Server?</h4>
+              <p>The instance runs the commercial RealVNC Server, which must be licensed?</p>
+              <p>VNC server is configured to accept a known weak password, because authentication is performed by the gateway server. It is also configured to only accept connections from localhost, and this avoids exposing an insecure VNC server to the outside world.</p>
+              <p>(This means that anyone who can obtain local login session to the instance can also create a VNC session.)</p>
+              <h4 id="on-atmosphere-server-atmosphere-ansible">On Atmosphere server: atmosphere-ansible</h4>
+              <p>At instance deploy time, atmosphere-ansible configures VNC Server and NoVNC WebSocket server on new instances via the <a href="https://github.com/cyverse/atmosphere-ansible/tree/c49d4fb25bf1e0881ef694608e3b49b3ae654c27/ansible/roles/atmo-realvncserver">atmo-realvncserver</a> role and <a href="https://github.com/cyverse/atmosphere-ansible/tree/master/ansible/roles/atmo-novnc">atmo-novnc</a> role, respectively.</p>
+              <p>These roles roughly do this:</p>
+              <ul>
+              <li>Check for existence of an X window server on the instance</li>
+              <li>Install and configure RealVNC Server, set license</li>
+              <li>Install NoVNC WebSocket server bits (websockify?)</li>
+              <li>Start VNC Server with more configuration</li>
+              </ul>
+              <p>Later in the instance deployment process, the <a href="https://github.com/cyverse/atmosphere/blob/535ad5d3ebeb8ef75eb93edf8b3ea8eb8b17dbf7/service/tasks/driver.py#L1173">check_web_desktop_task</a> runs the atmo_check_novnc playbook (calling <a href="https://github.com/cyverse/atmosphere-ansible/blob/master/ansible/roles/atmo-check-vnc/tasks/main.yml">atmo-check-novnc</a> role); this role checks to see if a VNC server is running. If this Ansible run succeeds, then the “Web desktop” field is set to true for the instance in the Atmosphere database. This causes the Web Desktop button to appear in the Troposphere UI when the instance page is loaded.</p>
               <h2 id="implementation-guide">Implementation Guide</h2>
-              <p>Choose a server to run the Nginx NoVNC Auth services</p>
-              <p>…</p>
+              <p>Define the following in the variables.yml that you will pass to Clank (see the Atmosphere <a href="install_guide.html#requirements-for-configuration">installation guide</a>).</p>
+              <ul>
+              <li>WEB_DESKTOP_SIGNING_SALT</li>
+              <li>WEB_DESKTOP_FP_SALT</li>
+              <li>WEB_DESKTOP_SIGNING_SECRET_KEY</li>
+              <li>WEB_DESKTOP_FP_SECRET_KEY</li>
+              <li>WEB_DESKTOP_INCLUDE_LINK</li>
+              <li>WEB_DESKTOP_PROXY_URL</li>
+              <li>WEB_DESKTOP_PROXY_DOMAIN</li>
+              <li>ATMOSPHERE_VNC_LICENSE?</li>
+              </ul>
+              <p>Collectively, we’ll call the first four of these “shared secrets for web desktop”.</p>
+              <p>Choose a server to run the Nginx NoVNC Auth services. (It can’t be the same as your Atmosphere server right now because of the way the Ansible is written, but this would be straightforward to change.) Define a “novnc_proxy” group in your Ansible hosts, containing the NoVNC proxy server you wish to use.</p>
+              <p>Run Clank the <a href="install_guide.html">usual way</a> to deploy Atmosphere, if you haven’t done so already.</p>
+              <p>Clank will populate <a href="https://github.com/cyverse/troposphere/blob/88459d132388ecf14851733946965d391a452c71/troposphere/settings/local.py.j2">troposphere’s local.py</a> with the shared secrets for web desktop.</p>
+              <p>Next, deploy the NoVNC Auth + Proxy server using the <a href="https://github.com/cyverse/clank/blob/master/playbooks/utils/install_novnc_auth.yml">utility playbook</a> included with Clank.</p>
+              <p>Note that unlike Clank’s usual behavior of deploying only to the local system, this playbook will run against the remote <code>novnc_proxy</code> host.</p>
+              <p><em>To be continued / not tested yet</em></p>
               <h2 id="questions">Questions</h2>
               <ul>
-              <li>What exactly does the NoVNC server component on instances do?</li>
-              <li>Regarding terminology, does the “NoVNC Proxy” run on the Atmosphere instance or on the Nginx server?</li>
-              <li>How does Atmosphere come to know that an instance has web desktop enabled?</li>
-              <li>Why do we have a NoVNC proxy? For auth?</li>
-              <li>How is auth handled for the websocket, i.e. how does the instance authenticate users? Shared secret between instance and NoVNC proxy, and NoVNC proxy somehow confirms that requests came from Atmosphere?</li>
+              <li>How does http_auth_request_module get enabled on Nginx?</li>
+              <li>The WebSocket is not encrypted all the way from the client to the Atmosphere instance, only to the proxy server (and then unencrypted to the instance), correct?</li>
+              </ul>
+              <h2 id="todo">TODO</h2>
+              <ul>
+              <li>Review/update https://github.com/cyverse/clank/tree/master/playbooks/utils/README.md It doesnt say that the shared secrets for web desktop above must be defined, but they likely must</li>
+              <li>Should we recommend that network between the NoVNC proxy server and instances is private/secure, because websocket/VNC traffic between them is unencrypted?</li>
+              <li>Should we recommend a border firewall / OpenStack security group to prevent VNC server on instances from being expoised to the world?</li>
               </ul>
               </article>
             </div> <!-- #main -->
