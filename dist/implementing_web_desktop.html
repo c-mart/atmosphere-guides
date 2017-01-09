@@ -34,7 +34,7 @@
                                   <aside>
                       <h3> TABLE OF CONTENTS </h3>
                       <ul>
-                      <li><a href="#implementing-web-desktop-novnc-proxy">Implementing Web Desktop (NoVNC Proxy)</a><ul>
+                      <li><a href="#implementing-web-desktop-novnc-gateway">Implementing Web Desktop (NoVNC Gateway)</a><ul>
                       <li><a href="#overview-how-it-works">Overview / How It Works</a><ul>
                       <li><a href="#summary-of-connection-workflow">Summary of Connection Workflow</a></li>
                       <li><a href="#novnc-connection-ascii-diagram">NoVNC Connection ASCII Diagram</a></li>
@@ -55,7 +55,7 @@
                   </aside>
                               <!-- MAIN CONTENT -->
               <article>
-              <h1 id="implementing-web-desktop-novnc-proxy">Implementing Web Desktop (NoVNC Proxy)</h1>
+              <h1 id="implementing-web-desktop-novnc-gateway">Implementing Web Desktop (NoVNC Gateway)</h1>
               <h2 id="overview-how-it-works">Overview / How It Works</h2>
               <p><a href="https://kanaka.github.io/noVNC/">NoVNC</a> (<a href="https://github.com/novnc/noVNC/blob/master/README.md">readme</a>) is an HTML5 VNC client. It is used with Atmosphere to provide a seamless browser-based experience for users who wish to interact with their instance with a GUI, rather than a shell.</p>
               <p>NoVNC has no built-in means of authentication, and the (open source) VNC protocol has no encryption, so the instance’s VNC server is behind a gateway server, which authenticates connection requests from users and proxies a secure WebSocket which contains VNC traffic.</p>
@@ -118,34 +118,67 @@
               </ul>
               <p>Later in the instance deployment process, the <a href="https://github.com/cyverse/atmosphere/blob/535ad5d3ebeb8ef75eb93edf8b3ea8eb8b17dbf7/service/tasks/driver.py#L1173">check_web_desktop_task</a> runs the atmo_check_novnc playbook (calling <a href="https://github.com/cyverse/atmosphere-ansible/blob/master/ansible/roles/atmo-check-vnc/tasks/main.yml">atmo-check-novnc</a> role); this role checks to see if a VNC server is running. If this Ansible run succeeds, then the “Web desktop” field is set to true for the instance in the Atmosphere database. This causes the Web Desktop button to appear in the Troposphere UI when the instance page is loaded.</p>
               <h2 id="implementation-guide">Implementation Guide</h2>
-              <p>Define the following in the variables.yml that you will pass to Clank (see the Atmosphere <a href="install_guide.html#requirements-for-configuration">installation guide</a>).</p>
-              <ul>
-              <li>WEB_DESKTOP_SIGNING_SALT</li>
-              <li>WEB_DESKTOP_FP_SALT</li>
-              <li>WEB_DESKTOP_SIGNING_SECRET_KEY</li>
-              <li>WEB_DESKTOP_FP_SECRET_KEY</li>
-              <li>WEB_DESKTOP_INCLUDE_LINK</li>
-              <li>WEB_DESKTOP_PROXY_URL</li>
-              <li>WEB_DESKTOP_PROXY_DOMAIN</li>
-              <li>ATMOSPHERE_VNC_LICENSE?</li>
-              </ul>
-              <p>Collectively, we’ll call the first four of these “shared secrets for web desktop”.</p>
-              <p>Choose a server to run the Nginx NoVNC Auth services. (It can’t be the same as your Atmosphere server right now because of the way the Ansible is written, but this would be straightforward to change.) Define a “novnc_proxy” group in your Ansible hosts, containing the NoVNC proxy server you wish to use.</p>
+              <p>First, choose a server to run the Nginx NoVNC Auth services. (It can’t be the same as your Atmosphere server right now because of the way the Ansible is written, but this would be straightforward to change.) Define a “novnc_proxy” group in your Ansible hosts, containing the NoVNC proxy server you wish to use.</p>
+              <p>Ensure there is an OpenStack security rule allowing port 4200 from your NoVNC Gateway server’s IP address</p>
+              <p>Define the following in the variables.yml that you will pass to Clank (see the Atmosphere <a href="install_guide.html#requirements-for-configuration">installation guide</a>). Generate some random strings for the salts and secrets. (Collectively, we’ll call these “shared secrets for web desktop”.)</p>
+              <pre><code>###
+              # Web Desktop
+              ###
+              # Salts for signing/verifying authentication tokens and creading/decoding browser fingerprints
+              # WEB_DESKTOP_SIGNING_SALT: &quot;&quot;
+              # WEB_DESKTOP_FP_SALT: &quot;&quot;
+              # Shared secrets for signing/verifying authentication tokens and creading/decoding browser fingerprints
+              # WEB_DESKTOP_SIGNING_SECRET_KEY: &quot;&quot;
+              # WEB_DESKTOP_FP_SECRET_KEY: &quot;&quot;
+              # Troposphere feature flag to enable Web Desktop?
+              # WEB_DESKTOP_INCLUDE_LINK: False  
+              # Should be set to &quot;https://my-novnc-gateway-server.com/vncws&quot;
+              # WEB_DESKTOP_PROXY_URL: &quot;&quot;
+              # Should be set to &quot;.my-novnc-gateway-server.com&quot;, allows Troposphere to set a cross-domain cookie readable by your NoVNC gateway server
+              # WEB_DESKTOP_PROXY_DOMAIN: &quot;&quot;  </code></pre>
+              <p>Also define a RealVNC license key:</p>
+              <pre><code>###
+              # VNC
+              ###
+              # ATMOSPHERE_VNC_LICENSE: &quot;&quot;</code></pre>
               <p>Run Clank the <a href="install_guide.html">usual way</a> to deploy Atmosphere, if you haven’t done so already.</p>
               <p>Clank will populate <a href="https://github.com/cyverse/troposphere/blob/88459d132388ecf14851733946965d391a452c71/troposphere/settings/local.py.j2">troposphere’s local.py</a> with the shared secrets for web desktop.</p>
-              <p>Next, deploy the NoVNC Auth + Proxy server using the <a href="https://github.com/cyverse/clank/blob/master/playbooks/utils/install_novnc_auth.yml">utility playbook</a> included with Clank.</p>
+              <p>Next, deploy the NoVNC Auth + Proxy server using the <a href="https://github.com/cyverse/clank/blob/master/playbooks/utils/install_novnc_auth.yml">utility playbook</a> included with Clank – more detailed instructions <a href="https://github.com/cyverse/clank/tree/master/playbooks/utils">here</a>.</p>
+              <p>(Should those instructions end up in this doc instead?)</p>
               <p>Note that unlike Clank’s usual behavior of deploying only to the local system, this playbook will run against the remote <code>novnc_proxy</code> host.</p>
               <p><em>To be continued / not tested yet</em></p>
               <h2 id="questions">Questions</h2>
               <ul>
               <li>How does http_auth_request_module get enabled on Nginx?</li>
               <li>The WebSocket is not encrypted all the way from the client to the Atmosphere instance, only to the proxy server (and then unencrypted to the instance), correct?</li>
+              <li>Why do we use both a “signing key” and a “fingerprint key” here? Why two separate secrets?</li>
               </ul>
               <h2 id="todo">TODO</h2>
               <ul>
-              <li>Review/update https://github.com/cyverse/clank/tree/master/playbooks/utils/README.md It doesnt say that the shared secrets for web desktop above must be defined, but they likely must</li>
+              <li>install_novnc_auth.yml expects SSL certificate and key to already exist on target server but doesn’t put them there. it should put them there.</li>
+              <li>install_novnc_auth.yml uses some broken old Clank variables, update as follows: ``` # git diff playbooks/utils/install_novnc_auth.yml diff –git a/playbooks/utils/install_novnc_auth.yml b/playbooks/utils/install_novnc_auth.yml index 56379de..a4bd7bc 100644 — a/playbooks/utils/install_novnc_auth.yml +++ b/playbooks/utils/install_novnc_auth.yml @@ -136,8 +136,8 @@ vars: dhparam: “/etc/ssl/certs/dhparam.pem” key_size: 2048</li>
+              <li>privkey_pem: “{{ ATMO.nginx.KEY_PATH }}/{{ ATMO.nginx.KEY_FILE }}”</li>
+              <li>fullchain_pem: “{{ ATMO.nginx.COMBINED_CERT_PATH | default(‘/etc/ssl/certs/self_signed_combined.crt’) }}”</li>
+              <li>privkey_pem: “{{ SSL_KEY }}”</li>
+              <li>fullchain_pem: “{{ COMBINED_CERT }}” ssl_cert: “{{ SSL_CERTIFICATE | default(‘/etc/ssl/certs/self-signed.crt’) }}” bundle_cert: “{{ BUNDLE_CERT | default(‘/etc/ssl/certs/empty_bundle.crt’) }}” ```</li>
+              <li><p><code>clank/group_vars/novnc_proxy</code> references old-style nested variables, which breaks stuff:</p>
+              <pre><code>web_desktop_signing_secret_key: &quot;{{ TROPO[&#39;local.py&#39;].WEB_DESKTOP_SIGNING_SECRET_KEY }}&quot;
+              web_desktop_signing_salt: &quot;{{ TROPO[&#39;local.py&#39;].WEB_DESKTOP_SIGNING_SALT }}&quot;
+              web_desktop_fp_secret_key: &quot;{{ TROPO[&#39;local.py&#39;].WEB_DESKTOP_FP_SECRET_KEY }}&quot;
+              web_desktop_fp_salt: &quot;{{ TROPO[&#39;local.py&#39;].WEB_DESKTOP_FP_SALT }}&quot;</code></pre>
+              <p>Change the four lines to</p>
+              <pre><code>web_desktop_signing_secret_key: &quot;{{ WEB_DESKTOP_SIGNING_SECRET_KEY }}&quot;
+              web_desktop_signing_salt: &quot;{{ WEB_DESKTOP_SIGNING_SALT }}&quot;
+              web_desktop_fp_secret_key: &quot;{{ WEB_DESKTOP_FP_SECRET_KEY }}&quot;
+              web_desktop_fp_salt: &quot;{{ WEB_DESKTOP_FP_SALT }}&quot;</code></pre></li>
+              <li>Playbook doesn’t know how to deal with SSL key encrypted with Ansible Vault</li>
+              <li>Playbook should allow Nginx port through firewall</li>
+              <li><p>In uwsgi log:</p>
+              <pre><code>IOError: [Errno 2] No such file or directory: &#39;/opt/dev/nginx_novnc_auth/logs/novnc_auth.log&#39;</code></pre>
+              <p>Playbook should create this file and make it owned by www-data</p></li>
+              <li>Review/update https://github.com/cyverse/clank/tree/master/playbooks/utils/README.md It doesnt say that the shared secrets for web desktop above must be defined, but they likely must be</li>
               <li>Should we recommend that network between the NoVNC proxy server and instances is private/secure, because websocket/VNC traffic between them is unencrypted?</li>
-              <li>Should we recommend a border firewall / OpenStack security group to prevent VNC server on instances from being expoised to the world?</li>
+              <li><p>Should we recommend a border firewall / OpenStack security group to prevent VNC server on instances from being exposed to the world?</p></li>
               </ul>
               </article>
             </div> <!-- #main -->

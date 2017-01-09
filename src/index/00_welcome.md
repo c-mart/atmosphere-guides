@@ -4,7 +4,7 @@ This site is intended to provide guides for how Atmosphere should be used. Both 
 
 # The Guides
 - [Install Guide](./install_guide.html)
-- [Implementing Web Desktop (NoVNC Proxy)](./implementing_web_desktop.html)
+- [Implementing Web Desktop (NoVNC Gateway)](./implementing_web_desktop.html)
 - [Connecting a Cloud Provider](./connecting_cloud_provider.html)
 - [Staff Guide](./staff_guide.html)
 - [User Guide](./user_guide.html)
